@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Mic, Send, Loader2, Sparkles, Wand2, Target, CheckCircle2, ImagePlus, RefreshCw, Palette, Trash2 } from 'lucide-react';
+import { Mic, Send, Loader2, Wand2, Target, CheckCircle2, ImagePlus, RefreshCw, Palette, Edit3, X, Save, RotateCw, ZoomIn, Sparkles } from 'lucide-react';
 import { generateAdCopy, generateAdImage, refineAdImage } from '../services/geminiService';
 import { GeneratedAd, AdContent } from '../types';
 import AdPreview from './AdPreview';
@@ -17,6 +17,16 @@ const AdCreator: React.FC = () => {
   const [visualPrompt, setVisualPrompt] = useState('');
   const [isImageLoading, setIsImageLoading] = useState(false);
   
+  // Editing State
+  const [isEditing, setIsEditing] = useState(false);
+  const [editConfig, setEditConfig] = useState({ filter: 'none', zoom: 1, rotation: 0 });
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [editingImageSrc, setEditingImageSrc] = useState<string | null>(null);
+
+  // Publish State
+  const [showPublishDialog, setShowPublishDialog] = useState(false);
+  const [publishSuccess, setPublishSuccess] = useState(false);
+  
   const [error, setError] = useState<string | null>(null);
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef<any>(null);
@@ -27,7 +37,7 @@ const AdCreator: React.FC = () => {
       // @ts-ignore
       const recognition = new window.webkitSpeechRecognition();
       recognition.continuous = false;
-      recognition.lang = 'en-US'; // Defaulting to EN, but could be dynamic
+      recognition.lang = 'en-US'; 
       recognition.interimResults = false;
 
       recognition.onstart = () => setIsListening(true);
@@ -40,6 +50,44 @@ const AdCreator: React.FC = () => {
       recognitionRef.current = recognition;
     }
   }, []);
+
+  // Canvas Drawing Effect for Editor
+  useEffect(() => {
+    if (isEditing && editingImageSrc && canvasRef.current) {
+      const canvas = canvasRef.current;
+      const ctx = canvas.getContext('2d');
+      const img = new Image();
+      img.src = editingImageSrc;
+      
+      img.onload = () => {
+        // Set canvas size to match image aspect ratio but high quality
+        canvas.width = 1024;
+        canvas.height = 1024; // Assuming 1:1 for social ads mostly
+
+        if (ctx) {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.save();
+          
+          // Move to center
+          ctx.translate(canvas.width / 2, canvas.height / 2);
+          
+          // Rotate
+          ctx.rotate((editConfig.rotation * Math.PI) / 180);
+          
+          // Zoom
+          ctx.scale(editConfig.zoom, editConfig.zoom);
+          
+          // Filter
+          ctx.filter = editConfig.filter;
+
+          // Draw Image centered
+          ctx.drawImage(img, -canvas.width / 2, -canvas.height / 2, canvas.width, canvas.height);
+          
+          ctx.restore();
+        }
+      };
+    }
+  }, [isEditing, editingImageSrc, editConfig]);
 
   const handleMicClick = () => {
     if (recognitionRef.current) {
@@ -127,8 +175,212 @@ const AdCreator: React.FC = () => {
     }
   };
 
+  const openEditor = () => {
+    if (generatedAd?.imageUrl) {
+      setEditingImageSrc(generatedAd.imageUrl);
+      setEditConfig({ filter: 'none', zoom: 1, rotation: 0 });
+      setIsEditing(true);
+    }
+  };
+
+  const saveEditedImage = () => {
+    if (canvasRef.current) {
+      const newImageUrl = canvasRef.current.toDataURL('image/png');
+      setImageCandidates(prev => [newImageUrl, ...prev]);
+      if (generatedAd) {
+        setGeneratedAd({ ...generatedAd, imageUrl: newImageUrl });
+      }
+      setIsEditing(false);
+    }
+  };
+
+  const handlePublishClick = () => {
+    setShowPublishDialog(true);
+  };
+
+  const confirmPublish = () => {
+    if (!generatedAd) return;
+
+    try {
+        const savedCampaignsStr = localStorage.getItem('campaigns');
+        const savedCampaigns = savedCampaignsStr ? JSON.parse(savedCampaignsStr) : [];
+        
+        const newCampaign = {
+            ...generatedAd,
+            status: 'Active',
+            publishedAt: new Date().toISOString()
+        };
+
+        const updatedCampaigns = [newCampaign, ...savedCampaigns];
+        localStorage.setItem('campaigns', JSON.stringify(updatedCampaigns));
+
+        setShowPublishDialog(false);
+        setPublishSuccess(true);
+        
+        // Reset after delay
+        setTimeout(() => {
+            setPublishSuccess(false);
+            setGeneratedAd(null);
+            setPrompt('');
+            setImageCandidates([]);
+            setVisualPrompt('');
+        }, 2000);
+
+    } catch (e) {
+        console.error("Failed to save campaign", e);
+        setError("Failed to save campaign locally.");
+        setShowPublishDialog(false);
+    }
+  };
+
+  const filters = [
+    { name: 'Normal', value: 'none' },
+    { name: 'B&W', value: 'grayscale(100%)' },
+    { name: 'Warm', value: 'sepia(40%)' },
+    { name: 'Cool', value: 'hue-rotate(180deg)' },
+    { name: 'Vivid', value: 'saturate(200%)' },
+  ];
+
   return (
-    <div className="max-w-6xl mx-auto h-full flex flex-col lg:flex-row gap-8">
+    <div className="max-w-6xl mx-auto h-full flex flex-col lg:flex-row gap-8 relative">
+      {/* Editor Overlay */}
+      {isEditing && (
+        <div className="fixed inset-0 z-50 bg-slate-900/90 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-white rounded-2xl w-full max-w-4xl h-[90vh] flex flex-col overflow-hidden shadow-2xl animate-in zoom-in-95">
+            <div className="p-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
+              <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2">
+                <Edit3 size={20} /> Edit Image
+              </h3>
+              <div className="flex gap-2">
+                <button onClick={() => setIsEditing(false)} className="p-2 hover:bg-slate-200 rounded-full text-slate-500">
+                  <X size={24} />
+                </button>
+              </div>
+            </div>
+            
+            <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
+               {/* Canvas Area */}
+               <div className="flex-1 bg-slate-100 flex items-center justify-center p-8 overflow-auto">
+                 <div className="relative shadow-xl border-4 border-white bg-white">
+                   <canvas ref={canvasRef} className="max-h-[60vh] max-w-full object-contain" />
+                 </div>
+               </div>
+
+               {/* Controls */}
+               <div className="w-full lg:w-80 bg-white border-l border-slate-200 p-6 flex flex-col gap-6 overflow-y-auto">
+                 <div>
+                   <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 block">Filters</label>
+                   <div className="grid grid-cols-3 gap-2">
+                     {filters.map(f => (
+                       <button
+                         key={f.name}
+                         onClick={() => setEditConfig({ ...editConfig, filter: f.value })}
+                         className={`px-3 py-2 rounded-lg text-sm font-medium border transition-all ${
+                           editConfig.filter === f.value 
+                           ? 'bg-brand-50 border-brand-500 text-brand-700' 
+                           : 'border-slate-200 hover:border-slate-300 text-slate-600'
+                         }`}
+                       >
+                         {f.name}
+                       </button>
+                     ))}
+                   </div>
+                 </div>
+
+                 <div>
+                   <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 block flex items-center justify-between">
+                     <span>Zoom / Crop</span>
+                     <ZoomIn size={14} />
+                   </label>
+                   <input 
+                     type="range" 
+                     min="1" 
+                     max="3" 
+                     step="0.1" 
+                     value={editConfig.zoom}
+                     onChange={(e) => setEditConfig({ ...editConfig, zoom: parseFloat(e.target.value) })}
+                     className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-brand-600"
+                   />
+                   <div className="flex justify-between text-xs text-slate-400 mt-1">
+                     <span>1x</span>
+                     <span>3x</span>
+                   </div>
+                 </div>
+
+                 <div>
+                   <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 block flex items-center justify-between">
+                     <span>Rotation</span>
+                     <RotateCw size={14} />
+                   </label>
+                   <div className="flex gap-2">
+                     {[0, 90, 180, 270].map(deg => (
+                       <button
+                        key={deg}
+                        onClick={() => setEditConfig({ ...editConfig, rotation: deg })}
+                        className={`flex-1 py-2 rounded-lg text-sm font-medium border transition-all ${
+                          editConfig.rotation === deg 
+                          ? 'bg-brand-50 border-brand-500 text-brand-700' 
+                          : 'border-slate-200 hover:border-slate-300 text-slate-600'
+                        }`}
+                       >
+                         {deg}°
+                       </button>
+                     ))}
+                   </div>
+                 </div>
+
+                 <div className="mt-auto pt-6 border-t border-slate-100">
+                    <button 
+                      onClick={saveEditedImage}
+                      className="w-full bg-brand-600 text-white py-3 rounded-xl font-bold hover:bg-brand-700 transition-colors flex items-center justify-center gap-2"
+                    >
+                      <Save size={18} /> Apply Changes
+                    </button>
+                 </div>
+               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Publish Confirmation Dialog */}
+      {showPublishDialog && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl animate-in zoom-in-95">
+            <h3 className="text-xl font-bold text-slate-900 mb-2">Publish Campaign?</h3>
+            <p className="text-slate-500 mb-6">
+              This will save your ad and mark it as active. Are you ready to launch?
+            </p>
+            
+            <div className="flex gap-3">
+              <button 
+                onClick={() => setShowPublishDialog(false)}
+                className="flex-1 py-2.5 px-4 rounded-xl font-medium text-slate-600 hover:bg-slate-100 transition-colors"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={confirmPublish}
+                className="flex-1 py-2.5 px-4 rounded-xl font-bold text-white bg-brand-600 hover:bg-brand-700 shadow-lg shadow-brand-500/30 transition-colors"
+              >
+                Confirm Publish
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Success Overlay */}
+      {publishSuccess && (
+         <div className="fixed inset-0 z-50 bg-white/90 backdrop-blur-md flex flex-col items-center justify-center p-4 animate-in fade-in">
+             <div className="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mb-4 animate-bounce">
+                 <CheckCircle2 size={32} />
+             </div>
+             <h2 className="text-2xl font-bold text-slate-900 mb-2">Campaign Published!</h2>
+             <p className="text-slate-500">Redirecting to dashboard...</p>
+         </div>
+      )}
+
       {/* Left Panel: Input & Image Studio */}
       <div className="flex-1 flex flex-col">
         {/* Main Creation Form - Hide only if we are in 'view' mode but keep accessible */}
@@ -221,7 +473,7 @@ const AdCreator: React.FC = () => {
                     className="w-full h-24 p-3 bg-white border border-slate-200 rounded-lg text-sm text-slate-800 focus:ring-2 focus:ring-brand-500 outline-none resize-none"
                     placeholder="Describe the image you want..."
                  />
-                 <div className="flex gap-2 mt-3">
+                 <div className="flex flex-wrap gap-2 mt-3">
                    <button 
                     onClick={handleGenerateNewImage}
                     disabled={isImageLoading}
@@ -236,7 +488,15 @@ const AdCreator: React.FC = () => {
                     className="flex-1 bg-white border border-slate-300 text-slate-700 py-2 px-4 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors flex items-center justify-center gap-2"
                    >
                      {isImageLoading ? <Loader2 size={16} className="animate-spin"/> : <RefreshCw size={16} />}
-                     Refine Selected
+                     Refine with AI
+                   </button>
+                   <button 
+                    onClick={openEditor}
+                    disabled={isImageLoading}
+                    className="flex-1 bg-brand-50 border border-brand-200 text-brand-700 py-2 px-4 rounded-lg text-sm font-medium hover:bg-brand-100 transition-colors flex items-center justify-center gap-2"
+                   >
+                     <Edit3 size={16} />
+                     Edit Manual
                    </button>
                  </div>
               </div>
@@ -244,22 +504,23 @@ const AdCreator: React.FC = () => {
               {imageCandidates.length > 0 && (
                 <div>
                    <label className="block text-xs font-semibold text-slate-500 uppercase mb-2">Generated Candidates</label>
-                   <div className="flex gap-3 overflow-x-auto pb-4">
+                   <div className="flex gap-3 overflow-x-auto pb-4 scrollbar-hide">
                       {imageCandidates.map((img, idx) => (
-                        <button 
-                          key={idx}
-                          onClick={() => selectImage(img)}
-                          className={`relative w-24 h-24 flex-shrink-0 rounded-lg overflow-hidden border-2 transition-all ${
-                            generatedAd.imageUrl === img ? 'border-brand-600 ring-2 ring-brand-100' : 'border-slate-200 opacity-70 hover:opacity-100'
-                          }`}
-                        >
-                          <img src={img} alt={`Candidate ${idx}`} className="w-full h-full object-cover" />
-                          {generatedAd.imageUrl === img && (
-                            <div className="absolute inset-0 bg-brand-600/10 flex items-center justify-center">
-                               <CheckCircle2 size={24} className="text-white drop-shadow-md bg-brand-600 rounded-full" />
-                            </div>
-                          )}
-                        </button>
+                        <div key={idx} className="relative group flex-shrink-0">
+                           <button 
+                            onClick={() => selectImage(img)}
+                            className={`relative w-24 h-24 rounded-lg overflow-hidden border-2 transition-all ${
+                              generatedAd.imageUrl === img ? 'border-brand-600 ring-2 ring-brand-100' : 'border-slate-200 opacity-70 hover:opacity-100'
+                            }`}
+                          >
+                            <img src={img} alt={`Candidate ${idx}`} className="w-full h-full object-cover" />
+                            {generatedAd.imageUrl === img && (
+                              <div className="absolute inset-0 bg-brand-600/10 flex items-center justify-center">
+                                <CheckCircle2 size={24} className="text-white drop-shadow-md bg-brand-600 rounded-full" />
+                              </div>
+                            )}
+                          </button>
+                        </div>
                       ))}
                    </div>
                 </div>
@@ -315,7 +576,10 @@ const AdCreator: React.FC = () => {
                 <p className="text-sm text-slate-600 leading-relaxed">{generatedAd.targetAudience}</p>
               </div>
               
-              <button className="w-full py-3 bg-brand-600 text-white rounded-xl font-semibold hover:bg-brand-700 transition-colors flex items-center justify-center gap-2 shadow-lg shadow-brand-500/30">
+              <button 
+                onClick={handlePublishClick}
+                className="w-full py-3 bg-brand-600 text-white rounded-xl font-semibold hover:bg-brand-700 transition-colors flex items-center justify-center gap-2 shadow-lg shadow-brand-500/30"
+              >
                 <Send size={18} />
                 Publish Campaign
               </button>

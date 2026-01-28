@@ -1,8 +1,7 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { AdContent, AdPlatform } from "../types";
 
-const apiKey = process.env.API_KEY || '';
-const ai = new GoogleGenAI({ apiKey });
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 // Helper to determine the best model for the task
 const TEXT_MODEL = 'gemini-3-flash-preview';
