@@ -1,0 +1,7 @@
+{
+  "name": "AdVantage",
+  "description": "AI-powered ad creation platform allowing users to generate multi-platform ad campaigns from a single command using Gemini.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
